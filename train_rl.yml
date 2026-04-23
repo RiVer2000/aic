@@ -1,0 +1,37 @@
+name: aic_train
+root: /home/rishabh/ws_aic/src/aic
+
+windows:
+  - training:
+      layout: tiled
+      panes:
+        - gazebo:
+            - distrobox enter -r aic_eval -- bash -c "__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia /entrypoint.sh ground_truth:=false start_aic_engine:=true"
+
+        - policy:
+            - sleep 15
+            - pixi run --frozen ros2 run aic_model aic_model --ros-args -p use_sim_time:=true -p policy:=river_policy.TrainingPolicy
+
+        - activate:
+            - sleep 25
+            - pixi run --frozen ros2 lifecycle set /aic_model configure
+            - sleep 2
+            - pixi run --frozen ros2 lifecycle set /aic_model activate
+            - echo "aic_model activated — training loop starting"
+
+        - train_loop:
+            - sleep 30
+            - |
+              TRIAL_1="{task: {id: 'trial_1', cable_type: 'sfp_sc', cable_name: 'cable_0', plug_type: 'sfp', plug_name: 'sfp_tip', port_type: 'sfp', port_name: 'sfp_port_0', target_module_name: 'nic_card_mount_0', time_limit: 180}}"
+              TRIAL_2="{task: {id: 'trial_2', cable_type: 'sfp_sc', cable_name: 'cable_0', plug_type: 'sfp', plug_name: 'sfp_tip', port_type: 'sfp', port_name: 'sfp_port_0', target_module_name: 'nic_card_mount_1', time_limit: 180}}"
+              TRIAL_3="{task: {id: 'trial_3', cable_type: 'sfp_sc', cable_name: 'cable_1', plug_type: 'sc', plug_name: 'sc_tip', port_type: 'sc', port_name: 'sc_port_base', target_module_name: 'sc_port_1', time_limit: 180}}"
+              GOALS=("$TRIAL_1" "$TRIAL_2" "$TRIAL_3")
+              episode=0
+              while true; do
+                idx=$((episode % 3))
+                goal="${GOALS[$idx]}"
+                echo "=== Episode $((episode + 1)) (trial $((idx + 1))) ==="
+                pixi run --frozen ros2 action send_goal /insert_cable aic_task_interfaces/action/InsertCable "$goal"
+                episode=$((episode + 1))
+                sleep 2
+              done
