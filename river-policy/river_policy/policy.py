@@ -149,7 +149,8 @@ class MyPolicy(Policy):
     SPIRAL_POINTS_PER_TURN = 8    #       angular resolution
     SPIRAL_DWELL = 0.25           # s     hold each XY position to let the plug settle
     SPIRAL_PUSH_OFFSET = 0.006    # m     command Z this far below contact_z to push lightly
-    SPIRAL_DROP_THRESHOLD = 0.003 # m     Z drop past contact_z that signals a found hole
+    SPIRAL_DROP_THRESHOLD = 0.006 # m     Z drop past contact_z that signals a found hole
+    SPIRAL_DROP_CONFIRM_STEPS = 2 #       extra dwell steps to sustain before committing
     SPIRAL_STIFFNESS = [80.0, 80.0, 30.0, 40.0, 40.0, 40.0]   # low Z so plug can drop in
     SPIRAL_DAMPING = [40.0, 40.0, 25.0, 18.0, 18.0, 18.0]
 
@@ -316,20 +317,16 @@ class MyPolicy(Policy):
     PORT_Z_BASE_LINK = 0.20
 
     # Maximum XY correction we'll trust from a single vision detection.
-    # Bounded so a misdetection can't drive us far off the engine's spawn pose.
-    MAX_VISION_XY_CORRECTION = 0.04   # m  — ±4 cm
+    # Set to 0.0 to disable vision correction entirely.
+    # Disabled: run logs showed the blob detector consistently picks the wrong
+    # dark feature, and the resulting correction moved Trial 2 off the port.
+    MAX_VISION_XY_CORRECTION = 0.0   # m  — set > 0 to re-enable
 
     # Per-module coarse XY correction applied before Phase 1.
-    # These compensate for board positions that place the target port far from
-    # the arm's fixed spawn pose.  Derived from the delta between each trial's
-    # board Y in sample_config.yaml:
-    #   trial_1/2  board y=-0.20  →  no correction needed
-    #   trial_3    board y= 0.00  →  +0.20 m board shift → arm must move ~-0.19 m in Y
-    # Tune by inspecting "contact at z=..." in run.log after a calibration run:
-    # if final-plug-port-distance < SPIRAL_MAX_RADIUS the spiral will find the port.
-    MODULE_XY_OFFSETS: dict[str, tuple[float, float]] = {
-        "sc_port_1": (0.00, -0.19),   # (dx, dy) in base_link metres — tune empirically
-    }
+    # sc_port_1 was (0.00, -0.19) but run logs showed that offset moved the plug
+    # from 210 mm to 310 mm from the port — wrong direction or wrong magnitude.
+    # Cleared until a ground_truth:=true calibration run determines the correct value.
+    MODULE_XY_OFFSETS: dict[str, tuple[float, float]] = {}
 
     # Camera frame → base_link sign convention. The center wrist camera
     # looks roughly down at the workpiece. Standard ROS camera optical frame:
@@ -548,6 +545,20 @@ class MyPolicy(Policy):
                 drop = contact_z - cur_z
 
                 if drop > self.SPIRAL_DROP_THRESHOLD:
+                    # Confirm the drop is sustained, not a momentary surface dip.
+                    confirmed = True
+                    for _ in range(self.SPIRAL_DROP_CONFIRM_STEPS):
+                        self._send_pose(
+                            move_robot, target, self.SPIRAL_STIFFNESS, self.SPIRAL_DAMPING
+                        )
+                        self.sleep_for(self.STEP_DT)
+                        obs = self._wait_for_obs(get_observation)
+                        cur_z = obs.controller_state.tcp_pose.position.z
+                        if (contact_z - cur_z) < self.SPIRAL_DROP_THRESHOLD:
+                            confirmed = False
+                            break
+                    if not confirmed:
+                        continue
                     msg = (
                         f"hole found at xy=({target_x:.4f}, {target_y:.4f}), "
                         f"r={r*1000:.1f} mm, drop={drop*1000:.1f} mm"

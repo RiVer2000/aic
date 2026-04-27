@@ -80,14 +80,14 @@ Continue descending at 10 mm/s with softer Z-stiffness (60 N/m). Exit on:
 | `\|dfz\|` > 22 N **and** lateral > 8 N | Hard stall — connector jammed |
 | No 1 mm of progress in 2 s | Plug stuck on port face → trigger spiral |
 
-### Phase 3 — Spiral search (~6 s worst case)
+### Phase 3 — Spiral search (~12 s worst case)
 
 Fired only if Phase 2 didn't insert. Sweeps an Archimedean spiral in XY
 around the contact point:
-- 4 turns × 6 points = 24 XY positions
-- Radius 0 → 12 mm linearly
+- 6 turns × 8 points = 48 XY positions
+- Radius 0 → 70 mm linearly
 - 0.25 s dwell at each point
-- Z held 3 mm below contact_z with low Z-stiffness (30 N/m)
+- Z held 6 mm below contact_z with low Z-stiffness (30 N/m)
 
 If `cur_z` drops > 3 mm past contact_z at any XY → "hole found", commit and
 push down the full insertion depth at that XY.
@@ -134,15 +134,17 @@ below.
 | V0.5 | + Phase 3 spiral search | 83.1 (spiral exhausted) |
 | V0.6 | Tried gripper reorient — cable physics fought back | 56.0 (regressed) |
 | V0.7a | Reverted reorient, added vision probe | 90.2 |
-| **V0.7b** | Vision XY correction wired into descent + spiral | **90.2** |
+| V0.7b | Vision XY correction wired into descent + spiral | 90.2 |
+| V0.8 | Expanded spiral (70 mm, 6 turns); per-module XY offsets | 86.8 |
+| **V0.9** | Disabled vision correction; cleared wrong sc_port_1 offset; raised spiral drop threshold to 6 mm + sustain check | **TBD** |
 
-Per-trial breakdown at V0.7b:
+Per-trial breakdown at V0.8 (last measured run):
 
-| Trial | Plug | Final dist | Tier 1 | Tier 2 | Tier 3 | Total |
-|-------|------|-----------|--------|--------|--------|-------|
-| 1 | SFP | 0.05 m | 1 | ~23 | ~24 | ~48 |
-| 2 | SFP | 0.06 m | 1 | ~23 | ~13 | ~37 |
-| 3 | SC  | 0.21 m | 1 | 0 | 0 | 1 |
+| Trial | Plug | Final dist | Notes | Total |
+|-------|------|-----------|-------|-------|
+| 1 | SFP | 0.05 m | Spiral false-positive: "hole found" at wrong feature | 44.9 |
+| 2 | SFP | 0.07 m | Vision pushed arm 4.5 mm X off-target; hit max depth, no contact | 40.9 |
+| 3 | SC  | 0.31 m | Module offset (0.00, -0.19) moved plug further away, not closer | 1.0 |
 
 ---
 
@@ -209,15 +211,13 @@ working-distance hand-coded estimate and gives true depth.
 - Cons: still relies on correct blob detection; doesn't help Trial 3
 - Expected gain: small bump in trials 1+2 if accuracy improves
 
-### C. Read `task.target_module_name` + spawn-relative geometry — 4 hours
+### C. ~~Read `task.target_module_name` + spawn-relative geometry~~ — **DONE**
 
-Names like `nic_card_mount_0`, `nic_card_mount_1`, `sc_port_1` encode the
-target's approximate position on the board. The board's rough position is
-inferable from where the plug starts. Hardcode an XY offset by module
-name for each trial type.
-- Pros: would specifically unlock Trial 3
-- Cons: hacky; doesn't generalize; needs hand-tuning per random seed
-- Expected gain: Trial 3 from 1 → 30-50
+Implemented in `MyPolicy.MODULE_XY_OFFSETS` in `policy.py`. A dict keyed by
+`task.target_module_name` maps to a `(dx, dy)` shift applied on top of the
+vision correction before Phase 1. Currently tuned for `sc_port_1`:
+`(0.00, -0.19)` m. Expand the dict entries for additional module names as needed.
+- Expected gain not yet measured — run Trial 3 to confirm.
 
 ### D. Imitation learning on CheatCode demos — 3-5 days
 
@@ -329,9 +329,11 @@ All are class constants on `MyPolicy` in `policy.py`. Common ones:
 | `INSERT_DEPTH` | 0.015 m | Phase 2 success threshold |
 | `INSERT_PHASE_TIMEOUT` | 8.0 s | Phase 2 hard cap |
 | `NO_PROGRESS_TIMEOUT` | 2.0 s | Phase 2 no-progress trigger |
-| `SPIRAL_MAX_RADIUS` | 0.012 m | Phase 3 spiral max |
-| `SPIRAL_TURNS` | 4 | Phase 3 spiral revolutions |
-| `MAX_VISION_XY_CORRECTION` | 0.04 m | Vision shift clamp |
+| `SPIRAL_MAX_RADIUS` | 0.070 m | Phase 3 spiral max |
+| `SPIRAL_TURNS` | 6 | Phase 3 spiral revolutions |
+| `SPIRAL_POINTS_PER_TURN` | 8 | Phase 3 angular resolution |
+| `SPIRAL_DROP_THRESHOLD` | 0.006 m | Z drop to declare hole found (+ 2-step sustain) |
+| `MAX_VISION_XY_CORRECTION` | 0.0 m | Vision shift clamp (0 = disabled) |
 | `VISION_FLIP_X / Y / SWAP_AXES` | False | Camera→base_link sign overrides |
 | `APPROACH_STIFFNESS` | [90,90,90,50,50,50] | Phase 1 admittance |
 | `INSERT_STIFFNESS` | [80,80,60,40,40,40] | Phase 2 admittance |
