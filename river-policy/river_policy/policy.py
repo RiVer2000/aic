@@ -126,6 +126,10 @@ class MyPolicy(Policy):
 
     # --- tunable parameters -------------------------------------------------
     REORIENT_TIME = 2.0           # s     SLERP duration for the plug-aligning rotation
+    REORIENT_AT_CONTACT_FRACTION = 0.6
+    REORIENT_AT_CONTACT_TIME = 1.5
+    REORIENT_AT_CONTACT_STIFFNESS = [70.0, 70.0, 60.0, 15.0, 15.0, 30.0]
+    REORIENT_AT_CONTACT_DAMPING   = [40.0, 40.0, 40.0, 10.0, 10.0, 15.0]
     SETTLE_AT_START = 0.7         # s     wait for arm/cable to stabilise before baselining wrench
     DESCENT_SPEED = 0.030         # m/s   approach descent rate (faster — port up to 13 cm away)
     INSERT_SPEED = 0.010          # m/s   post-contact descent rate
@@ -133,7 +137,7 @@ class MyPolicy(Policy):
     CONTACT_FORCE = 5.0           # N     wrench delta over baseline to declare contact
     MIN_APPROACH_BEFORE_CONTACT = 0.005  # m  must descend at least this far before contact is allowed
     STALL_FORCE = 22.0            # N     excessive wrench delta → abort
-    MAX_APPROACH_DEPTH = 0.20     # m     safety stop if no contact by then
+    MAX_APPROACH_DEPTH = 0.25     # m     safety stop if no contact by then
     INSERT_DEPTH = 0.015          # m     additional descent after contact = success
     INSERT_PHASE_TIMEOUT = 8.0    # s     hard cap on Phase 2 (prevents lock-up if plug jams)
     NO_PROGRESS_TIMEOUT = 2.0     # s     bail if cur_z hasn't dropped 1 mm within this window
@@ -151,7 +155,7 @@ class MyPolicy(Policy):
     SPIRAL_DWELL = 0.25           # s     hold each XY position to let the plug settle
     SPIRAL_PUSH_OFFSET = 0.006    # m     command Z this far below contact_z to push lightly
     SPIRAL_DROP_THRESHOLD = 0.006 # m     Z drop past contact_z that signals a found hole
-    SPIRAL_DROP_CONFIRM_STEPS = 2 #       extra dwell steps to sustain before committing
+    SPIRAL_DROP_CONFIRM_STEPS = 3 #       extra dwell steps to sustain before committing
     SPIRAL_STIFFNESS = [80.0, 80.0, 30.0, 40.0, 40.0, 40.0]   # low Z so plug can drop in
     SPIRAL_DAMPING = [40.0, 40.0, 25.0, 18.0, 18.0, 18.0]
 
@@ -542,6 +546,102 @@ class MyPolicy(Policy):
 
     # ------------------------------------------------------------------
 
+    def _ascend_to(self, get_observation, move_robot, target_z, hold_x, hold_y, hold_ori):
+        """Lift the TCP back up to target_z at DESCENT_SPEED, holding XY and orientation."""
+        obs = self._wait_for_obs(get_observation)
+        commanded_z = obs.controller_state.tcp_pose.position.z
+        step = self.DESCENT_SPEED * self.STEP_DT
+        while commanded_z < target_z:
+            commanded_z = min(commanded_z + step, target_z)
+            self._send_pose(
+                move_robot,
+                Pose(position=Point(x=hold_x, y=hold_y, z=commanded_z), orientation=hold_ori),
+                self.APPROACH_STIFFNESS,
+                self.APPROACH_DAMPING,
+            )
+            self.sleep_for(self.STEP_DT)
+
+    def _reorient_at_contact(
+        self,
+        get_observation,
+        move_robot,
+        send_feedback,
+        plug_name: str,
+        contact_z: float,
+    ):
+        """Phase 1.5: partial SLERP (REORIENT_AT_CONTACT_FRACTION) toward plug-aligned
+        orientation at the contact point, pinning the plug tip to avoid XY drift.
+
+        Returns (new_hold_x, new_hold_y, new_hold_ori) from the actual post-reorient obs.
+        """
+        plug_offset = self.PLUG_OFFSET_IN_GRIPPER.get(
+            plug_name, self.PLUG_OFFSET_IN_GRIPPER["sfp_tip"]
+        )
+        q_plug_in_gripper = euler2quat(*self.PLUG_GRASP_RPY, axes="sxyz")
+        q_home_wxyz = np.array([0.0, 1.0, 0.0, 0.0])
+        q_target_full = qmult(q_home_wxyz, qinverse(q_plug_in_gripper))
+
+        obs = self._wait_for_obs(get_observation)
+        cur_pose = obs.controller_state.tcp_pose
+        q_cur = np.array([
+            cur_pose.orientation.w, cur_pose.orientation.x,
+            cur_pose.orientation.y, cur_pose.orientation.z,
+        ])
+        cur_pos = np.array([cur_pose.position.x, cur_pose.position.y, cur_pose.position.z])
+        plug_tip_world = cur_pos + quat2mat(q_cur) @ plug_offset
+
+        q_partial = self._slerp_wxyz(q_cur, q_target_full, self.REORIENT_AT_CONTACT_FRACTION)
+        n_steps = max(1, int(self.REORIENT_AT_CONTACT_TIME / self.STEP_DT))
+        send_feedback("river-policy: partial reorient at contact")
+        self.get_logger().info(
+            f"Reorient-at-contact: plug_tip_world="
+            f"({plug_tip_world[0]:.3f}, {plug_tip_world[1]:.3f}, {plug_tip_world[2]:.3f})"
+        )
+
+        for i in range(1, n_steps + 1):
+            t = i / n_steps
+            q_interp = self._slerp_wxyz(q_cur, q_partial, t)
+            R_interp = quat2mat(q_interp)
+            gripper_pos = plug_tip_world - R_interp @ plug_offset
+            self._send_pose(
+                move_robot,
+                Pose(
+                    position=Point(
+                        x=float(gripper_pos[0]),
+                        y=float(gripper_pos[1]),
+                        z=float(gripper_pos[2]),
+                    ),
+                    orientation=Quaternion(
+                        w=float(q_interp[0]),
+                        x=float(q_interp[1]),
+                        y=float(q_interp[2]),
+                        z=float(q_interp[3]),
+                    ),
+                ),
+                self.REORIENT_AT_CONTACT_STIFFNESS,
+                self.REORIENT_AT_CONTACT_DAMPING,
+            )
+            self.sleep_for(self.STEP_DT)
+
+        obs = self._wait_for_obs(get_observation)
+        new_pose = obs.controller_state.tcp_pose
+        self.get_logger().info(
+            f"Post-reorient TCP: xyz=({new_pose.position.x:.4f}, "
+            f"{new_pose.position.y:.4f}, {new_pose.position.z:.4f})"
+        )
+        return (
+            new_pose.position.x,
+            new_pose.position.y,
+            Quaternion(
+                x=new_pose.orientation.x,
+                y=new_pose.orientation.y,
+                z=new_pose.orientation.z,
+                w=new_pose.orientation.w,
+            ),
+        )
+
+    # ------------------------------------------------------------------
+
     def _spiral_search_and_insert(
         self,
         get_observation,
@@ -699,6 +799,11 @@ class MyPolicy(Policy):
                 f"→ descent centre ({hold_x:.4f}, {hold_y:.4f})"
             )
 
+        # Remember raw (pre-vision) XY so we can retry without vision if we miss.
+        original_x = hold_x
+        original_y = hold_y
+        raw_xy_retry_done = False
+
         # Phase 0 — Settle: hold position, then average wrench to get a baseline.
         # Initial readings include cable weight + dynamic settling and would otherwise
         # trigger a false "contact" before any motion happened.
@@ -755,6 +860,39 @@ class MyPolicy(Policy):
 
             # Safety — don't descend past the reachable workspace.
             if (start_z - commanded_z) >= self.MAX_APPROACH_DEPTH:
+                if not raw_xy_retry_done and vis_ok:
+                    # Vision may have pointed at the wrong blob. Ascend, reset to raw
+                    # spawn XY and re-baseline, then retry the descent without correction.
+                    self.get_logger().warn(
+                        "Max depth without contact — retrying from raw spawn XY "
+                        f"(was vis correction dx={dx_vis*1000:+.1f} dy={dy_vis*1000:+.1f} mm)"
+                    )
+                    send_feedback("river-policy: retrying without vision correction")
+                    raw_xy_retry_done = True
+                    self._ascend_to(get_observation, move_robot, start_z, hold_x, hold_y, hold_ori)
+                    hold_x = original_x
+                    hold_y = original_y
+                    commanded_z = start_z
+                    baseline_retry = []
+                    for _ in range(settle_steps):
+                        self._send_pose(
+                            move_robot,
+                            Pose(
+                                position=Point(x=hold_x, y=hold_y, z=start_z),
+                                orientation=hold_ori,
+                            ),
+                            self.APPROACH_STIFFNESS,
+                            self.APPROACH_DAMPING,
+                        )
+                        self.sleep_for(self.STEP_DT)
+                        obs = self._wait_for_obs(get_observation)
+                        wr = obs.wrist_wrench.wrench
+                        baseline_retry.append([wr.force.x, wr.force.y, wr.force.z])
+                    baseline = np.mean(baseline_retry[-10:], axis=0)
+                    self.get_logger().info(
+                        f"Retry baseline: fx={baseline[0]:.1f} fy={baseline[1]:.1f} fz={baseline[2]:.1f} N"
+                    )
+                    continue
                 self.get_logger().warn(
                     f"Max approach depth ({self.MAX_APPROACH_DEPTH*100:.0f} cm) without contact "
                     f"— actual descent {descended*1000:.1f} mm"
@@ -790,15 +928,24 @@ class MyPolicy(Policy):
             self._hold_current_pose(get_observation, move_robot)
             return True
 
+        # Phase 1.5 — Partial reorient at contact to compensate plug tilt.
+        # SLERP 60% toward aligned orientation while pinning the plug tip, so that
+        # Phase 2 descends with the plug axis better aligned with the port.
+        hold_x, hold_y, hold_ori = self._reorient_at_contact(
+            get_observation, move_robot, send_feedback, task.plug_name, contact_z
+        )
+        obs = self._wait_for_obs(get_observation)
+        phase2_start_z = obs.controller_state.tcp_pose.position.z
+
         # Phase 2 — Settle / seat: continue descending slowly. Hard-bound the
         # phase so a stuck plug-on-port-face never spins the loop forever.
         step_insert = self.INSERT_SPEED * self.STEP_DT
-        commanded_z = contact_z
+        commanded_z = phase2_start_z
         insert_successful = False
 
         phase2_max = min(self.INSERT_PHASE_TIMEOUT, max(0.0, time_limit - 6.0))
         phase2_deadline = self.time_now() + Duration(seconds=phase2_max)
-        last_progress_z = contact_z
+        last_progress_z = phase2_start_z
         last_progress_t = self.time_now()
 
         while self.time_now() < deadline and self.time_now() < phase2_deadline:
@@ -809,7 +956,7 @@ class MyPolicy(Policy):
             dfy = wr.force.y - baseline[1]
             cur_z = obs.controller_state.tcp_pose.position.z
 
-            descended_after_contact = contact_z - cur_z
+            descended_after_contact = phase2_start_z - cur_z
 
             # Success: descended past the insertion depth after first contact.
             if descended_after_contact >= self.INSERT_DEPTH:
