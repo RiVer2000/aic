@@ -140,6 +140,7 @@ class MyPolicy(Policy):
     APPROACH_STALL_LIMIT = 0.05   # m     |commanded_z - cur_z| over this → joint stall, abort approach
     SETTLE_TIME = 1.0             # s     pause at end to let connector seat
     HOLD_AT_END_TIME = 0.5        # s     command current pose to stop motion before returning
+    BASELINE_LATERAL_ABORT = 15.0 # N     |fx| or |fy| in baseline → bad spawn, abort
 
     # Phase 3 — Spiral search after Phase 2 fails.
     # Lifts the plug a hair, then sweeps XY in an Archimedean spiral around the
@@ -312,31 +313,31 @@ class MyPolicy(Policy):
             ),
         )
 
-    # Approx. base_link Z of the port surface (varies trial-to-trial; this is a
-    # rough average to estimate the camera-to-port working distance).
-    PORT_Z_BASE_LINK = 0.20
-
-    # Maximum XY correction we'll trust from a single vision detection.
-    # Set to 0.0 to disable vision correction entirely.
-    # Disabled: run logs showed the blob detector consistently picks the wrong
-    # dark feature, and the resulting correction moved Trial 2 off the port.
-    MAX_VISION_XY_CORRECTION = 0.0   # m  — set > 0 to re-enable
-
     # Per-module coarse XY correction applied before Phase 1.
-    # sc_port_1 was (0.00, -0.19) but run logs showed that offset moved the plug
-    # from 210 mm to 310 mm from the port — wrong direction or wrong magnitude.
-    # Cleared until a ground_truth:=true calibration run determines the correct value.
+    # Cleared until a ground_truth:=true calibration run determines correct values.
     MODULE_XY_OFFSETS: dict[str, tuple[float, float]] = {}
 
-    # Camera frame → base_link sign convention. The center wrist camera
-    # looks roughly down at the workpiece. Standard ROS camera optical frame:
-    # X right (in image), Y down (in image), Z forward (into scene).
-    # When camera Z aligns with world -Z, image-X maps to some world horizontal
-    # axis and image-Y to the other. We try ASSUMPTION_A first; if the
-    # detected port_world is consistently off-direction, set USE_FLIP.
-    VISION_FLIP_X = False
-    VISION_FLIP_Y = False
-    VISION_SWAP_AXES = False
+    # --- camera geometry (from URDF: ur_gz.urdf.xacro) ----------------------
+    # TCP (tool0) → cam_mount: pure translation along TCP Z, no rotation.
+    _TCP_TO_CAM_MOUNT_T = np.array([0.0, 0.0, -0.0265])
+
+    # cam_mount → each camera optical frame: (translation_in_mount, rpy_sxyz).
+    # Three cameras at ±60° yaw spread, all pitched down ~75°.
+    _CAMERAS = {
+        'left':   {'t': np.array([-0.09326, -0.053843, -0.007188]),
+                   'rpy': (0.0, -1.30899630, 0.523599027)},
+        'center': {'t': np.array([0.0,     -0.107700, -0.007190]),
+                   'rpy': (0.0, -1.30899630, 1.570796230)},
+        'right':  {'t': np.array([0.09326, -0.053843, -0.007188]),
+                   'rpy': (0.0, -1.30899630, 2.617993430)},
+    }
+
+    # Triangulation quality gate: max distance from any camera ray to the
+    # triangulated point before we reject the result as inconsistent.
+    TRIANGULATION_RESIDUAL_THRESH = 0.015  # m
+
+    # Safety clamp on the XY correction derived from triangulation.
+    MAX_TRIANGULATION_CORRECTION = 0.04  # m
 
     def _detect_port_pixel(self, img_msg, plug_type: str):
         """Find the most port-like dark blob near the image centre.
@@ -401,67 +402,118 @@ class MyPolicy(Policy):
             return None, None, None, 0
         return best[0], best[1], best[2], n_cand
 
-    def _vision_xy_correction(self, obs, task):
-        """Compute (dx_world, dy_world) port-relative-to-tcp offset from camera.
+    def _camera_poses_in_base_link(self, tcp_pose: Pose) -> dict:
+        """Return {cam_name: (origin_3d, R_cam_to_base)} for all three cameras."""
+        q = tcp_pose.orientation
+        R_tcp = quat2mat(np.array([q.w, q.x, q.y, q.z]))
+        p_tcp = np.array([tcp_pose.position.x, tcp_pose.position.y, tcp_pose.position.z])
 
-        Uses center camera intrinsics from CameraInfo. Returns (0.0, 0.0) and
-        a 'detected=False' flag if no port is found.
+        p_mount = p_tcp + R_tcp @ self._TCP_TO_CAM_MOUNT_T  # cam_mount origin in base_link
+        poses = {}
+        for name, cam in self._CAMERAS.items():
+            R_cam_in_mount = quat2mat(euler2quat(*cam['rpy'], axes='sxyz'))
+            poses[name] = (
+                p_mount + R_tcp @ cam['t'],   # camera origin in base_link
+                R_tcp @ R_cam_in_mount,       # R: camera frame → base_link
+            )
+        return poses
+
+    def _triangulate_port(self, obs, task):
+        """Detect port blob in all three cameras and triangulate 3D position.
+
+        Casts a pinhole ray through each camera's best blob detection, then
+        finds the least-squares intersection point. Requires ≥2 cameras and a
+        small per-camera residual before trusting the result.
+
+        Returns (dx, dy, detected) — XY correction from TCP in base_link.
         """
-        cx_px, cy_px, area, n_cand = self._detect_port_pixel(
-            obs.center_image, task.plug_type
-        )
-        cam_info = obs.center_camera_info
+        try:
+            import cv2  # noqa: F401 — needed inside _detect_port_pixel
+        except ImportError:
+            return 0.0, 0.0, False
 
-        if cx_px is None or len(cam_info.k) < 6:
+        cam_sources = [
+            ('left',   obs.left_image,   obs.left_camera_info),
+            ('center', obs.center_image, obs.center_camera_info),
+            ('right',  obs.right_image,  obs.right_camera_info),
+        ]
+
+        tcp_pose = obs.controller_state.tcp_pose
+        cam_poses = self._camera_poses_in_base_link(tcp_pose)
+
+        rays = []  # (origin, unit_direction, cam_name)
+        for cam_name, img, cam_info in cam_sources:
+            cx_px, cy_px, area, n_cand = self._detect_port_pixel(img, task.plug_type)
+            if cx_px is None or len(cam_info.k) < 6:
+                continue
+            fx = float(cam_info.k[0]); fy = float(cam_info.k[4])
+            cx_p = float(cam_info.k[2]); cy_p = float(cam_info.k[5])
+            if fx <= 0 or fy <= 0:
+                continue
+
+            # Pinhole ray in camera optical frame (Z forward, X right, Y down).
+            d_cam = np.array([(cx_px - cx_p) / fx, (cy_px - cy_p) / fy, 1.0])
+            d_cam /= np.linalg.norm(d_cam)
+
+            origin, R_cam = cam_poses[cam_name]
+            direction = R_cam @ d_cam
+            direction /= np.linalg.norm(direction)
+
+            rays.append((origin, direction, cam_name))
             self.get_logger().info(
-                f"Vision: no detection (cands={n_cand}) — descent will use TCP XY"
+                f"Tri {cam_name}: {n_cand} cands px=({cx_px:.0f},{cy_px:.0f}) "
+                f"area={area:.0f} "
+                f"origin=({origin[0]:.3f},{origin[1]:.3f},{origin[2]:.3f}) "
+                f"dir=({direction[0]:.3f},{direction[1]:.3f},{direction[2]:.3f})"
+            )
+
+        if len(rays) < 2:
+            self.get_logger().info(
+                f"Triangulation: {len(rays)} camera(s) detected — skipping"
             )
             return 0.0, 0.0, False
 
-        fx, cx_principal = float(cam_info.k[0]), float(cam_info.k[2])
-        fy, cy_principal = float(cam_info.k[4]), float(cam_info.k[5])
-        if fx <= 0 or fy <= 0:
-            self.get_logger().warn(f"Vision: bad intrinsics fx={fx} fy={fy}")
+        # Least-squares ray intersection.
+        # Minimise sum_i ||(I - d_i d_i^T)(P - o_i)||^2
+        # Solution: A P = b  where  A = sum(I - d d^T),  b = sum((I - d d^T) o)
+        A = np.zeros((3, 3))
+        b = np.zeros(3)
+        for origin, direction, _ in rays:
+            M = np.eye(3) - np.outer(direction, direction)
+            A += M
+            b += M @ origin
+
+        try:
+            port_3d = np.linalg.solve(A, b)
+        except np.linalg.LinAlgError:
+            self.get_logger().warn("Triangulation: singular system — skipping")
             return 0.0, 0.0, False
 
-        # Pixel offset from the camera's principal point.
-        du = cx_px - cx_principal
-        dv = cy_px - cy_principal
+        # Per-camera residual check — reject if cameras disagree.
+        max_residual = 0.0
+        for origin, direction, cam_name in rays:
+            v = port_3d - origin
+            residual = float(np.linalg.norm(v - np.dot(v, direction) * direction))
+            max_residual = max(max_residual, residual)
+            self.get_logger().info(f"Tri residual {cam_name}: {residual * 1000:.1f} mm")
 
-        # Working distance: camera (≈TCP) to port surface.
-        start_z = float(obs.controller_state.tcp_pose.position.z)
-        working_dist = max(0.04, start_z - self.PORT_Z_BASE_LINK)
+        if max_residual > self.TRIANGULATION_RESIDUAL_THRESH:
+            self.get_logger().warn(
+                f"Triangulation rejected: max residual {max_residual * 1000:.1f} mm "
+                f"> {self.TRIANGULATION_RESIDUAL_THRESH * 1000:.0f} mm"
+            )
+            return 0.0, 0.0, False
 
-        # Pinhole projection — pixel offset → metric offset in the camera plane.
-        x_cam = du * working_dist / fx
-        y_cam = dv * working_dist / fy
-
-        # Camera optical frame → base_link XY.
-        # First-pass assumption: camera X axis ≈ base_link Y axis,
-        #                       camera Y axis ≈ base_link -X axis
-        # (camera looks roughly down with image Y "forward" along world -X).
-        # The four flags above let us fix sign mistakes without re-flashing
-        # the policy code if the run logs say the correction is in the
-        # wrong direction.
-        if self.VISION_SWAP_AXES:
-            dx, dy = y_cam, x_cam
-        else:
-            dx, dy = -y_cam, x_cam
-        if self.VISION_FLIP_X:
-            dx = -dx
-        if self.VISION_FLIP_Y:
-            dy = -dy
-
-        # Clamp to a sane range so misdetections can't drag us far away.
-        max_corr = self.MAX_VISION_XY_CORRECTION
-        dx = float(np.clip(dx, -max_corr, max_corr))
-        dy = float(np.clip(dy, -max_corr, max_corr))
+        # Clamp XY correction so a bad triangulation can't drive us far off.
+        p_tcp = np.array([tcp_pose.position.x, tcp_pose.position.y, tcp_pose.position.z])
+        clamp = self.MAX_TRIANGULATION_CORRECTION
+        dx = float(np.clip(port_3d[0] - p_tcp[0], -clamp, clamp))
+        dy = float(np.clip(port_3d[1] - p_tcp[1], -clamp, clamp))
 
         self.get_logger().info(
-            f"Vision: {n_cand} cands, best px=({cx_px:.0f},{cy_px:.0f}) "
-            f"Δpx=({du:+.0f},{dv:+.0f}) area={area:.0f} | "
-            f"working_dist={working_dist*1000:.0f}mm fx={fx:.1f} fy={fy:.1f} | "
-            f"world Δxy=({dx*1000:+.1f},{dy*1000:+.1f}) mm"
+            f"Triangulation OK: port_3d=({port_3d[0]:.4f},{port_3d[1]:.4f},{port_3d[2]:.4f}) "
+            f"max_residual={max_residual * 1000:.1f} mm "
+            f"correction=({dx * 1000:+.1f},{dy * 1000:+.1f}) mm"
         )
         return dx, dy, True
 
@@ -622,16 +674,16 @@ class MyPolicy(Policy):
             f"Start pose: xyz=({hold_x:.3f}, {hold_y:.3f}, {start_z:.3f})"
         )
 
-        # V0.7b — Vision correction: detect the port in the center camera image,
-        # convert to world XY using camera intrinsics + working-distance estimate,
-        # and shift the descent/spiral centre toward that point. Capped to ±4 cm
-        # so a misdetection can't move us far off the engine's spawn pose.
-        dx_vis, dy_vis, vis_ok = self._vision_xy_correction(obs, task)
+        # V1.0 — Triangulated vision correction: cast a ray through the best
+        # port-blob in each of the three wrist cameras, find the least-squares
+        # 3D intersection, and shift the descent centre toward that point.
+        # Only applied when ≥2 cameras agree (residual < TRIANGULATION_RESIDUAL_THRESH).
+        dx_vis, dy_vis, vis_ok = self._triangulate_port(obs, task)
         if vis_ok:
             hold_x = hold_x + dx_vis
             hold_y = hold_y + dy_vis
             self.get_logger().info(
-                f"Descent centre after vision correction: ({hold_x:.4f}, {hold_y:.4f})"
+                f"Descent centre after triangulation: ({hold_x:.4f}, {hold_y:.4f})"
             )
 
         # Module-name coarse correction — applied on top of vision correction.
@@ -667,6 +719,19 @@ class MyPolicy(Policy):
         self.get_logger().info(
             f"Wrench baseline: fx={baseline[0]:.1f} fy={baseline[1]:.1f} fz={baseline[2]:.1f} N"
         )
+
+        # Baseline lateral force abort: if the arm spawned already in contact with
+        # something (e.g. trial 3 starting at Z=0.046 with fx=-30N), descending
+        # further causes a -11 penalty. Hold and return True immediately.
+        if max(abs(baseline[0]), abs(baseline[1])) > self.BASELINE_LATERAL_ABORT:
+            self.get_logger().warn(
+                f"Baseline lateral force too high "
+                f"(fx={baseline[0]:.1f} fy={baseline[1]:.1f} N) — "
+                "arm likely spawned in contact; holding and returning"
+            )
+            send_feedback("river-policy: bad spawn state detected, holding")
+            self._hold_current_pose(get_observation, move_robot)
+            return True
 
         # Phase 1 — Approach: descend straight down until contact (delta wrench).
         contact_z = None
