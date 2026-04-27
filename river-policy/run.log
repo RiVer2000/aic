@@ -1,102 +1,96 @@
-[INFO] [1777310245.931507629] [aic_model]: Loading policy module: river_policy.MyPolicy
-[INFO] [1777310245.955528228] [aic_model]: Loaded policy module river_policy.MyPolicy
-[INFO] [1777310245.955794037] [aic_model]: Using policy: MyPolicy
-[INFO] [1777310246.189581550] [aic_model]: on_configure(LifecycleState(label='unconfigured', state_id=1))
-[INFO] [1777310246.189833084] [aic_model]: Instantiating policy...
-[INFO] [1777310246.195328621] [aic_model]: Policy.__init__()
-[INFO] [1777310246.195655666] [aic_model]: MyPolicy (classical compliant descent) ready
-[ERROR] [1777310246.197533058] [aic_model]: aic_model lifecycle is not in the active state
-[INFO] [1777310247.196892571] [aic_model]: on_activate()
-[INFO] [1777310257.017751937] [aic_model]: Goal accepted
-[INFO] [1777310257.020242580] [aic_model]: Entering insert_cable_execute_callback()
-[INFO] [1777310257.022147888] [aic_model]: Start pose: xyz=(-0.373, 0.194, 0.319)
-[INFO] [1777310257.028015810] [aic_model]: insert_cable execute loop
-[INFO] [1777310257.241500957] [aic_model]: Vision: 34 cands, best px=(540,511) Δpx=(-36,-1) area=110 | working_dist=119mm fx=1236.6 fy=1236.6 | world Δxy=(+0.0,-0.0) mm
-[INFO] [1777310257.241844320] [aic_model]: Descent centre after vision correction: (-0.3728, 0.1939)
-[INFO] [1777310257.242221781] [aic_model]: Setting cartesian mode...
-[INFO] [1777310257.244562957] [aic_model]: Successfully set target mode
-[INFO] [1777310257.893761008] [aic_model]: Wrench baseline: fx=0.1 fy=0.6 fz=20.8 N
-[INFO] [1777310258.030407415] [aic_model]: insert_cable execute loop
-[INFO] [1777310259.036080315] [aic_model]: insert_cable execute loop
-[INFO] [1777310260.044134774] [aic_model]: insert_cable execute loop
-[INFO] [1777310261.051676998] [aic_model]: insert_cable execute loop
-[INFO] [1777310261.308690238] [aic_model]: contact at z=0.2348 (dfz=-5.8 N) after descending 84.4 mm
-[INFO] [1777310262.062043219] [aic_model]: insert_cable execute loop
-[INFO] [1777310263.068847359] [aic_model]: insert_cable execute loop
-[WARN] [1777310263.380453397] [aic_model]: no Z progress for 2.0s (stuck at z=0.2348, dfz=-5.3 N) — exiting insertion
-[INFO] [1777310263.384827873] [aic_model]: Spiral search around xy=(-0.3728, 0.1939) at z=0.2348
-[INFO] [1777310264.129426180] [aic_model]: insert_cable execute loop
-[INFO] [1777310265.213174800] [aic_model]: insert_cable execute loop
-[INFO] [1777310266.262746598] [aic_model]: insert_cable execute loop
-[INFO] [1777310267.339930746] [aic_model]: insert_cable execute loop
-[INFO] [1777310268.375917251] [aic_model]: insert_cable execute loop
-[INFO] [1777310269.393090506] [aic_model]: insert_cable execute loop
-[INFO] [1777310270.466550864] [aic_model]: insert_cable execute loop
-[INFO] [1777310271.589537065] [aic_model]: insert_cable execute loop
-[INFO] [1777310272.744049937] [aic_model]: insert_cable execute loop
-[INFO] [1777310273.300955612] [aic_model]: hole found at xy=(-0.4109, 0.1557), r=54.0 mm, drop=6.5 mm
-[INFO] [1777310273.822898052] [aic_model]: insert_cable execute loop
-[INFO] [1777310274.796497134] [aic_model]: Spiral commit complete (commanded_z=0.2148)
-[INFO] [1777310274.944989674] [aic_model]: insert_cable execute loop
-[INFO] [1777310276.220102850] [aic_model]: insert_cable execute loop
-[INFO] [1777310276.752383118] [aic_model]: insert_cable returning True (heuristic insert=True); engine will score by final plug position.
-[INFO] [1777310277.619935983] [aic_model]: insert_cable() returned True
-[INFO] [1777310278.145854891] [aic_model]: on_deactivate(LifecycleState(label='active', state_id=3))
-[INFO] [1777310278.748628153] [aic_model]: on_activate()
-[INFO] [1777310283.603685000] [aic_model]: Goal accepted
-[INFO] [1777310283.605740458] [aic_model]: Entering insert_cable_execute_callback()
-[INFO] [1777310283.607698484] [aic_model]: insert_cable execute loop
-[INFO] [1777310283.609200561] [aic_model]: Start pose: xyz=(-0.425, 0.153, 0.201)
-[INFO] [1777310283.617466867] [aic_model]: Vision: 24 cands, best px=(529,420) Δpx=(-47,-92) area=592 | working_dist=40mm fx=1236.6 fy=1236.6 | world Δxy=(+0.0,-0.0) mm
-[INFO] [1777310283.619075519] [aic_model]: Descent centre after vision correction: (-0.4247, 0.1530)
-[INFO] [1777310284.355512192] [aic_model]: Wrench baseline: fx=1.2 fy=0.3 fz=20.2 N
-[INFO] [1777310284.719340022] [aic_model]: insert_cable execute loop
-[INFO] [1777310285.800844963] [aic_model]: insert_cable execute loop
-[INFO] [1777310286.886828856] [aic_model]: insert_cable execute loop
-[INFO] [1777310287.999781329] [aic_model]: insert_cable execute loop
-[INFO] [1777310289.142881149] [aic_model]: insert_cable execute loop
-[INFO] [1777310290.339914562] [aic_model]: insert_cable execute loop
-[INFO] [1777310290.888589247] [aic_model]: contact at z=0.0464 (dfz=-6.1 N) after descending 154.2 mm
-[INFO] [1777310291.481430097] [aic_model]: insert_cable execute loop
-[INFO] [1777310292.688887148] [aic_model]: insert_cable execute loop
-[WARN] [1777310293.362120848] [aic_model]: no Z progress for 2.0s (stuck at z=0.0448, dfz=-7.5 N) — exiting insertion
-[INFO] [1777310293.363606957] [aic_model]: Spiral search around xy=(-0.4247, 0.1530) at z=0.0464
-[INFO] [1777310293.928020279] [aic_model]: insert_cable execute loop
-[INFO] [1777310295.138527528] [aic_model]: insert_cable execute loop
-[INFO] [1777310296.384856434] [aic_model]: insert_cable execute loop
-[INFO] [1777310297.718189493] [aic_model]: insert_cable execute loop
-[INFO] [1777310299.002843708] [aic_model]: insert_cable execute loop
-[INFO] [1777310300.240602862] [aic_model]: insert_cable execute loop
-[INFO] [1777310301.451145874] [aic_model]: insert_cable execute loop
-[INFO] [1777310302.646545287] [aic_model]: insert_cable execute loop
-[INFO] [1777310303.781377399] [aic_model]: insert_cable execute loop
-[INFO] [1777310304.909327505] [aic_model]: insert_cable execute loop
-[INFO] [1777310305.992165602] [aic_model]: insert_cable execute loop
-[INFO] [1777310307.116758634] [aic_model]: insert_cable execute loop
-[INFO] [1777310307.746416050] [aic_model]: Spiral search exhausted, no hole found
-[INFO] [1777310308.263605187] [aic_model]: insert_cable execute loop
-[INFO] [1777310309.452715394] [aic_model]: insert_cable execute loop
-[INFO] [1777310309.531986336] [aic_model]: insert_cable returning True (heuristic insert=False); engine will score by final plug position.
-[INFO] [1777310310.782986692] [aic_model]: insert_cable() returned True
-[INFO] [1777310311.687346526] [aic_model]: on_deactivate(LifecycleState(label='active', state_id=3))
-[INFO] [1777310312.488820965] [aic_model]: on_activate()
-[INFO] [1777310330.678614825] [aic_model]: Goal accepted
-[INFO] [1777310330.681605132] [aic_model]: Entering insert_cable_execute_callback()
-[INFO] [1777310330.682692080] [aic_model]: insert_cable execute loop
-[INFO] [1777310330.683332546] [aic_model]: Start pose: xyz=(-0.372, 0.131, 0.046)
-[INFO] [1777310330.696145352] [aic_model]: Vision: 18 cands, best px=(635,463) Δpx=(+59,-49) area=654 | working_dist=40mm fx=1236.6 fy=1236.6 | world Δxy=(+0.0,+0.0) mm
-[INFO] [1777310330.698023967] [aic_model]: Descent centre after vision correction: (-0.3715, 0.1314)
-[INFO] [1777310332.230068748] [aic_model]: Wrench baseline: fx=-30.6 fy=-4.8 fz=24.3 N
-[INFO] [1777310332.230497595] [aic_model]: contact at z=0.0376 (dfz=-80.3 N) after descending 8.8 mm
-[WARN] [1777310332.230903614] [aic_model]: stalled at z=0.0376, dfz=-80.3 lat=13.2
-[INFO] [1777310332.231189137] [aic_model]: Spiral search around xy=(-0.3715, 0.1314) at z=0.0376
-[INFO] [1777310332.743207397] [aic_model]: hole found at xy=(-0.3705, 0.1324), r=1.5 mm, drop=7.3 mm
-[INFO] [1777310332.981072616] [aic_model]: insert_cable execute loop
-[INFO] [1777310334.969547181] [aic_model]: insert_cable execute loop
-[INFO] [1777310335.324803579] [aic_model]: Spiral commit complete (commanded_z=0.0175)
-[INFO] [1777310337.193170895] [aic_model]: insert_cable execute loop
-[INFO] [1777310338.701301957] [aic_model]: insert_cable returning True (heuristic insert=True); engine will score by final plug position.
-[INFO] [1777310339.448077722] [aic_model]: insert_cable() returned True
-[INFO] [1777310339.823695433] [aic_model]: on_deactivate(LifecycleState(label='active', state_id=3))
-[INFO] [1777310340.181940784] [aic_model]: on_cleanup(LifecycleState(label='inactive', state_id=2))
-[INFO] [1777310340.192803220] [aic_model]: on_shutdown(LifecycleState(label='unconfigured', state_id=1))
+[INFO] [1777312023.815128999] [aic_model]: Loading policy module: river_policy.MyPolicy
+[INFO] [1777312023.840356112] [aic_model]: Loaded policy module river_policy.MyPolicy
+[INFO] [1777312023.840611680] [aic_model]: Using policy: MyPolicy
+[INFO] [1777312024.733897714] [aic_model]: on_configure(LifecycleState(label='unconfigured', state_id=1))
+[INFO] [1777312024.735827826] [aic_model]: Instantiating policy...
+[INFO] [1777312024.744908772] [aic_model]: Policy.__init__()
+[INFO] [1777312024.746039866] [aic_model]: MyPolicy (classical compliant descent) ready
+[ERROR] [1777312024.752308962] [aic_model]: aic_model lifecycle is not in the active state
+[INFO] [1777312025.748280535] [aic_model]: on_activate()
+[INFO] [1777312035.684352627] [aic_model]: Goal accepted
+[INFO] [1777312035.686315458] [aic_model]: Entering insert_cable_execute_callback()
+[INFO] [1777312035.688106224] [aic_model]: insert_cable execute loop
+[INFO] [1777312035.689367743] [aic_model]: Start pose: xyz=(-0.373, 0.194, 0.319)
+[INFO] [1777312035.920882962] [aic_model]: Tri left: 50 cands px=(590,534) area=1316 origin=(-0.466,0.248,0.353) dir=(-0.843,0.466,-0.270)
+[INFO] [1777312035.924430604] [aic_model]: Tri center: 33 cands px=(539,511) area=82 origin=(-0.373,0.302,0.353) dir=(0.001,0.973,-0.230)
+[INFO] [1777312035.929843154] [aic_model]: Tri right: 40 cands px=(547,497) area=116 origin=(-0.280,0.248,0.353) dir=(0.847,0.476,-0.236)
+[INFO] [1777312035.933914024] [aic_model]: Tri residual left: 2.9 mm
+[INFO] [1777312035.934962336] [aic_model]: Tri residual center: 1.9 mm
+[INFO] [1777312035.936360026] [aic_model]: Tri residual right: 1.0 mm
+[INFO] [1777312035.936771993] [aic_model]: Triangulation OK: port_3d=(-0.3733,0.1956,0.3798) max_residual=2.9 mm correction=(-0.4,+1.8) mm
+[INFO] [1777312035.937779612] [aic_model]: Descent centre after triangulation: (-0.3733, 0.1956)
+[INFO] [1777312035.938122332] [aic_model]: Setting cartesian mode...
+[INFO] [1777312035.939386322] [aic_model]: Successfully set target mode
+[INFO] [1777312036.601055906] [aic_model]: Wrench baseline: fx=0.2 fy=0.6 fz=20.8 N
+[INFO] [1777312036.702208676] [aic_model]: insert_cable execute loop
+[INFO] [1777312037.711702453] [aic_model]: insert_cable execute loop
+[INFO] [1777312038.721678848] [aic_model]: insert_cable execute loop
+[INFO] [1777312039.724210365] [aic_model]: insert_cable execute loop
+[INFO] [1777312039.935603692] [aic_model]: contact at z=0.2348 (dfz=-5.2 N) after descending 84.4 mm
+[INFO] [1777312040.725120837] [aic_model]: insert_cable execute loop
+[INFO] [1777312041.737810035] [aic_model]: insert_cable execute loop
+[WARN] [1777312041.960962576] [aic_model]: no Z progress for 2.0s (stuck at z=0.2348, dfz=-5.4 N) — exiting insertion
+[INFO] [1777312041.961327333] [aic_model]: Spiral search around xy=(-0.3733, 0.1956) at z=0.2348
+[INFO] [1777312042.780936340] [aic_model]: insert_cable execute loop
+[INFO] [1777312043.883509813] [aic_model]: insert_cable execute loop
+[INFO] [1777312044.985643287] [aic_model]: insert_cable execute loop
+[INFO] [1777312046.096073784] [aic_model]: insert_cable execute loop
+[INFO] [1777312047.336341432] [aic_model]: insert_cable execute loop
+[INFO] [1777312047.603505121] [aic_model]: hole found at xy=(-0.4025, 0.1956), r=29.2 mm, drop=6.3 mm
+[INFO] [1777312048.392096984] [aic_model]: insert_cable execute loop
+[INFO] [1777312049.027807586] [aic_model]: Spiral commit complete (commanded_z=0.2147)
+[INFO] [1777312049.548647944] [aic_model]: insert_cable execute loop
+[INFO] [1777312050.998317742] [aic_model]: insert_cable execute loop
+[INFO] [1777312051.081510223] [aic_model]: insert_cable returning True (heuristic insert=True); engine will score by final plug position.
+[INFO] [1777312052.523619674] [aic_model]: insert_cable() returned True
+[INFO] [1777312052.987348091] [aic_model]: on_deactivate(LifecycleState(label='active', state_id=3))
+[INFO] [1777312053.463361719] [aic_model]: on_activate()
+[INFO] [1777312056.888481038] [aic_model]: Goal accepted
+[INFO] [1777312056.891106515] [aic_model]: Entering insert_cable_execute_callback()
+[INFO] [1777312056.894387347] [aic_model]: insert_cable execute loop
+[INFO] [1777312056.895223624] [aic_model]: Start pose: xyz=(-0.372, 0.194, 0.321)
+[INFO] [1777312056.915061153] [aic_model]: Tri left: 50 cands px=(587,489) area=144 origin=(-0.466,0.248,0.355) dir=(-0.825,0.498,-0.268)
+[INFO] [1777312056.920222199] [aic_model]: Tri center: 31 cands px=(605,466) area=144 origin=(-0.372,0.302,0.355) dir=(0.037,0.959,-0.281)
+[INFO] [1777312056.930896998] [aic_model]: Tri right: 46 cands px=(593,439) area=148 origin=(-0.279,0.248,0.355) dir=(0.861,0.430,-0.271)
+[INFO] [1777312056.931495889] [aic_model]: Tri residual left: 2.6 mm
+[INFO] [1777312056.932575689] [aic_model]: Tri residual center: 1.2 mm
+[INFO] [1777312056.935464637] [aic_model]: Tri residual right: 2.1 mm
+[INFO] [1777312056.939273193] [aic_model]: Triangulation OK: port_3d=(-0.3774,0.1969,0.3849) max_residual=2.6 mm correction=(-5.2,+2.8) mm
+[INFO] [1777312056.940999987] [aic_model]: Descent centre after triangulation: (-0.3774, 0.1969)
+[INFO] [1777312057.603725595] [aic_model]: Wrench baseline: fx=0.1 fy=0.4 fz=20.7 N
+[INFO] [1777312057.913000901] [aic_model]: insert_cable execute loop
+[INFO] [1777312058.946480288] [aic_model]: insert_cable execute loop
+[INFO] [1777312059.962095045] [aic_model]: insert_cable execute loop
+[INFO] [1777312060.988752520] [aic_model]: insert_cable execute loop
+[INFO] [1777312062.005418778] [aic_model]: insert_cable execute loop
+[INFO] [1777312063.044891663] [aic_model]: insert_cable execute loop
+[INFO] [1777312064.128560236] [aic_model]: insert_cable execute loop
+[WARN] [1777312064.549393586] [aic_model]: Max approach depth (20 cm) without contact — actual descent 187.8 mm
+[INFO] [1777312065.219620650] [aic_model]: insert_cable() returned True
+[INFO] [1777312065.650141623] [aic_model]: on_deactivate(LifecycleState(label='active', state_id=3))
+[INFO] [1777312066.718520816] [aic_model]: on_activate()
+[INFO] [1777312069.842073344] [aic_model]: Goal accepted
+[INFO] [1777312069.847106189] [aic_model]: Entering insert_cable_execute_callback()
+[INFO] [1777312069.849488662] [aic_model]: Start pose: xyz=(-0.372, 0.194, 0.320)
+[INFO] [1777312069.850780138] [aic_model]: insert_cable execute loop
+[INFO] [1777312069.867853580] [aic_model]: Tri left: 58 cands px=(588,486) area=140 origin=(-0.465,0.248,0.354) dir=(-0.824,0.499,-0.268)
+[INFO] [1777312069.874172542] [aic_model]: Tri center: 45 cands px=(603,464) area=143 origin=(-0.372,0.302,0.354) dir=(0.039,0.959,-0.279)
+[INFO] [1777312069.879517103] [aic_model]: Tri right: 50 cands px=(561,476) area=144 origin=(-0.279,0.248,0.354) dir=(0.853,0.460,-0.247)
+[INFO] [1777312069.880996882] [aic_model]: Tri residual left: 0.8 mm
+[INFO] [1777312069.881375920] [aic_model]: Tri residual center: 1.7 mm
+[INFO] [1777312069.882951250] [aic_model]: Tri residual right: 1.0 mm
+[INFO] [1777312069.883532249] [aic_model]: Triangulation OK: port_3d=(-0.3770,0.1949,0.3831) max_residual=1.7 mm correction=(-4.8,+0.8) mm
+[INFO] [1777312069.885364582] [aic_model]: Descent centre after triangulation: (-0.3770, 0.1949)
+[INFO] [1777312070.544923885] [aic_model]: Wrench baseline: fx=0.2 fy=0.7 fz=20.9 N
+[INFO] [1777312070.859232535] [aic_model]: insert_cable execute loop
+[INFO] [1777312071.869529964] [aic_model]: insert_cable execute loop
+[INFO] [1777312072.886982143] [aic_model]: insert_cable execute loop
+[INFO] [1777312073.904094565] [aic_model]: insert_cable execute loop
+[INFO] [1777312074.927972318] [aic_model]: insert_cable execute loop
+[INFO] [1777312075.934734249] [aic_model]: insert_cable execute loop
+[INFO] [1777312076.954921745] [aic_model]: insert_cable execute loop
+[WARN] [1777312077.351240442] [aic_model]: Max approach depth (20 cm) without contact — actual descent 187.1 mm
+[INFO] [1777312077.990419245] [aic_model]: insert_cable() returned True
+[INFO] [1777312078.469251316] [aic_model]: on_deactivate(LifecycleState(label='active', state_id=3))
+[INFO] [1777312079.453789615] [aic_model]: on_cleanup(LifecycleState(label='inactive', state_id=2))
+[INFO] [1777312079.456318147] [aic_model]: on_shutdown(LifecycleState(label='unconfigured', state_id=1))
