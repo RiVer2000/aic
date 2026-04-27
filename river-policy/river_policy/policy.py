@@ -146,6 +146,15 @@ class MyPolicy(Policy):
     HOLD_AT_END_TIME = 0.5        # s     command current pose to stop motion before returning
     BASELINE_LATERAL_ABORT = 15.0 # N     |fx| or |fy| in baseline → bad spawn, abort
 
+    # V1.2 Phase 2 quality gates — prevent declaring "insertion success" after
+    # descending into a non-port feature on the board (Trial 3 false-success
+    # bug). A real port hole guides the plug compliantly: low sustained lateral
+    # force, low XY drift from the commanded descent center. Anything else with
+    # ≥INSERT_DEPTH descent is suspect.
+    PHASE2_QUALITY_WINDOW_STEPS = 10  #     ~0.5 s of recent samples for averaging
+    PHASE2_QUALITY_LAT_MAX = 5.0      # N   avg |lateral wrench delta| ≤ this for real success
+    PHASE2_QUALITY_DRIFT_MAX = 0.025  # m   |actual_xy − commanded_xy| ≤ this for real success
+
     # Phase 3 — Spiral search after Phase 2 fails.
     # Lifts the plug a hair, then sweeps XY in an Archimedean spiral around the
     # contact point, looking for a Z-drop that signals the plug fell into the hole.
@@ -942,11 +951,17 @@ class MyPolicy(Policy):
         step_insert = self.INSERT_SPEED * self.STEP_DT
         commanded_z = phase2_start_z
         insert_successful = False
+        phase2_rejected = False  # V1.2: set when descent reaches threshold but quality is bad
 
         phase2_max = min(self.INSERT_PHASE_TIMEOUT, max(0.0, time_limit - 6.0))
         phase2_deadline = self.time_now() + Duration(seconds=phase2_max)
         last_progress_z = phase2_start_z
         last_progress_t = self.time_now()
+
+        # V1.2 quality-gate buffer: rolling window of recent lateral wrench deltas.
+        # A real port descent has low sustained lateral; a wrong-feature descent
+        # produces lateral spikes.
+        recent_lateral: list[float] = []
 
         while self.time_now() < deadline and self.time_now() < phase2_deadline:
             obs = self._wait_for_obs(get_observation)
@@ -955,19 +970,58 @@ class MyPolicy(Policy):
             dfx = wr.force.x - baseline[0]
             dfy = wr.force.y - baseline[1]
             cur_z = obs.controller_state.tcp_pose.position.z
+            cur_x = obs.controller_state.tcp_pose.position.x
+            cur_y = obs.controller_state.tcp_pose.position.y
+
+            lateral = float(np.sqrt(dfx * dfx + dfy * dfy))
+            recent_lateral.append(lateral)
+            if len(recent_lateral) > self.PHASE2_QUALITY_WINDOW_STEPS:
+                recent_lateral.pop(0)
 
             descended_after_contact = phase2_start_z - cur_z
 
-            # Success: descended past the insertion depth after first contact.
+            # Success: descended past the insertion depth after first contact —
+            # but ONLY accept if the descent looks like it went into a real port.
             if descended_after_contact >= self.INSERT_DEPTH:
-                insert_successful = True
-                msg = f"inserted {descended_after_contact*1000:.1f} mm past contact (dfz={dfz:+.1f} N)"
-                self.get_logger().info(msg)
+                avg_lat = (
+                    float(np.mean(recent_lateral))
+                    if len(recent_lateral) >= self.PHASE2_QUALITY_WINDOW_STEPS
+                    else lateral
+                )
+                drift = float(np.sqrt((cur_x - hold_x) ** 2 + (cur_y - hold_y) ** 2))
+
+                if (
+                    avg_lat <= self.PHASE2_QUALITY_LAT_MAX
+                    and drift <= self.PHASE2_QUALITY_DRIFT_MAX
+                ):
+                    insert_successful = True
+                    msg = (
+                        f"inserted {descended_after_contact*1000:.1f} mm past contact "
+                        f"(dfz={dfz:+.1f} N, avg_lat={avg_lat:.1f} N, drift={drift*1000:.1f} mm)"
+                    )
+                    self.get_logger().info(msg)
+                    send_feedback(f"river-policy: {msg}")
+                    break
+
+                # FALSE SUCCESS — descended through a non-port feature. Don't
+                # commit. Ascend back to start_z so the engine measures the plug
+                # at the safer original spawn position, and skip Phase 3 spiral
+                # (we'd just re-descend into the same wrong feature).
+                phase2_rejected = True
+                msg = (
+                    f"rejecting Phase 2 success: descent {descended_after_contact*1000:.1f} mm "
+                    f"but avg_lat={avg_lat:.1f}N (>{self.PHASE2_QUALITY_LAT_MAX:.1f}) "
+                    f"or drift={drift*1000:.1f}mm (>{self.PHASE2_QUALITY_DRIFT_MAX*1000:.0f}mm) "
+                    "— likely wrong feature, ascending"
+                )
+                self.get_logger().warn(msg)
                 send_feedback(f"river-policy: {msg}")
+                self._ascend_to(
+                    get_observation, move_robot, start_z, hold_x, hold_y, hold_ori
+                )
                 break
 
             # Hard stall: very high force.
-            lateral = np.sqrt(dfx * dfx + dfy * dfy)
             if abs(dfz) > self.STALL_FORCE and lateral > 8.0:
                 msg = f"stalled at z={cur_z:.4f}, dfz={dfz:+.1f} lat={lateral:.1f}"
                 self.get_logger().warn(msg)
@@ -998,10 +1052,10 @@ class MyPolicy(Policy):
             )
             self.sleep_for(self.STEP_DT)
 
-        # Phase 3 — Spiral search if direct insertion failed.
-        # The plug is jammed on the port face (XY misaligned). Sweep XY
-        # in a small spiral around the contact point looking for the hole.
-        if not insert_successful and self.time_now() < deadline:
+        # Phase 3 — Spiral search if direct insertion failed (and wasn't rejected
+        # for quality reasons; in that case the plug is over a wrong feature and
+        # spiraling locally would just rejam us).
+        if not insert_successful and not phase2_rejected and self.time_now() < deadline:
             insert_successful = self._spiral_search_and_insert(
                 get_observation=get_observation,
                 move_robot=move_robot,

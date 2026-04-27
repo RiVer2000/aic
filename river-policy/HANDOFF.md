@@ -3,7 +3,9 @@
 A classical compliant-insertion policy for the Intrinsic AIC qualification
 phase. Scores **115.47 / 300** across the three configured trials in
 `aic_engine/config/sample_config.yaml` (V1.0). V1.1 adds plug-tilt
-compensation, vision-miss retry, and SC port depth increase.
+compensation, vision-miss retry, and SC port depth increase. **V1.2 adds
+Phase 2 quality gates** to reject false-success descents into non-port
+features (closes the Trial 3 regression seen in V1.1).
 
 This document assumes you already have the official WaveArm policy running on
 your machine (i.e., you can launch the Gazebo eval container and a policy node
@@ -114,9 +116,20 @@ is `phase2_start_z` (post-reorient gripper Z, not `contact_z`). Exit on:
 
 | Condition | Reason |
 |-----------|--------|
-| Descended ≥ 15 mm past `phase2_start_z` | Heuristic insertion success |
+| Descended ≥ 15 mm past `phase2_start_z` **AND** quality gates pass | Real insertion success |
+| Descended ≥ 15 mm but quality gates fail | **V1.2 false-success rejection** — ascend to start_z, skip Phase 3 |
 | `\|dfz\|` > 22 N **and** lateral > 8 N | Hard stall — connector jammed |
 | No 1 mm of progress in 2 s | Plug stuck on port face → trigger Phase 3 |
+
+**V1.2 quality gates** (both must pass to declare success):
+- Avg lateral wrench delta over last 0.5 s ≤ `PHASE2_QUALITY_LAT_MAX` (5 N)
+- TCP XY drift from commanded center ≤ `PHASE2_QUALITY_DRIFT_MAX` (25 mm)
+
+A real port hole guides the plug compliantly with low sustained lateral
+force and no XY drift. Hitting an arbitrary obstacle on the board produces
+lateral spikes and/or pushes the plug sideways. Without these gates, V1.1
+Trial 3 declared "inserted 15.8 mm" after descending into a wrong feature
+and ended 20 cm from the SC port (score: 1 pt).
 
 ### Phase 3 — Spiral search (~12 s worst case)
 
@@ -155,7 +168,8 @@ task "Task not completed" and zero out *all* Tier 2 + Tier 3 scoring.
 | V0.7b | Vision XY correction wired into descent + spiral | 90.2 |
 | V0.8 | Expanded spiral (70 mm, 6 turns); per-module XY offsets | 86.8 |
 | V1.0 | 3-camera triangulation; bad-spawn abort; raised drop threshold 3→6 mm; 2-step confirm | 115.47 |
-| **V1.1** | + Phase 1.5 partial reorient at contact; vision-miss retry; MAX_APPROACH_DEPTH 0.20→0.25 m; 3-step confirm | **TBD** |
+| V1.1 | + Phase 1.5 partial reorient at contact; vision-miss retry; MAX_APPROACH_DEPTH 0.20→0.25 m; 3-step confirm | 89.62 |
+| **V1.2** | + Phase 2 quality gates (avg lateral force + XY drift) to reject false-success descents into non-port features | **TBD** |
 
 Per-trial breakdown at V1.0 (score 115.47):
 
@@ -164,6 +178,17 @@ Per-trial breakdown at V1.0 (score 115.47):
 | 1 | SFP | ~0.05 m | Triangulation OK; spiral still didn't find port (plug tilt) | ~44 |
 | 2 | SFP | ~0.07 m | Triangulation picked wrong blob → vision offset made it worse | ~40 |
 | 3 | SC  | ~0.21 m | SC port out of camera FOV; baseline lateral abort fired on bad spawns | ~30 |
+
+Per-trial breakdown at V1.1 (score 89.62):
+
+| Trial | Plug | Final dist | Notes | Total |
+|-------|------|-----------|-------|-------|
+| 1 | SFP | 0.04 m | Phase 3 spiral **found hole** (heuristic insert) | 45.82 |
+| 2 | SFP | 0.05 m | Phase 3 spiral exhausted, no hole found | 42.81 |
+| 3 | SC  | 0.20 m | **False-success bug**: descended 15.8 mm into a non-port feature, ended outside max-distance bounding radius → all Tier 2 forfeit | 1.00 |
+
+The V1.1 regression on Trial 3 was the entire 26-pt drop; trials 1+2
+actually improved over V1.0. V1.2 closes that bug.
 
 ---
 
@@ -316,6 +341,9 @@ All are class constants on `MyPolicy` in `policy.py`. Common ones:
 | `SPIRAL_DROP_CONFIRM_STEPS` | **3** | Sustain steps before committing |
 | `TRIANGULATION_RESIDUAL_THRESH` | 0.015 m | Max ray residual to accept triangulation |
 | `BASELINE_LATERAL_ABORT` | 15.0 N | Lateral force in baseline → bad spawn abort |
+| `PHASE2_QUALITY_WINDOW_STEPS` | 10 | V1.2: rolling-window samples for avg lateral |
+| `PHASE2_QUALITY_LAT_MAX` | 5.0 N | V1.2: avg lateral threshold for real success |
+| `PHASE2_QUALITY_DRIFT_MAX` | 0.025 m | V1.2: TCP drift threshold for real success |
 | `APPROACH_STIFFNESS` | [90,90,90,50,50,50] | Phase 1 admittance |
 | `INSERT_STIFFNESS` | [80,80,60,40,40,40] | Phase 2 admittance |
 | `REORIENT_AT_CONTACT_STIFFNESS` | [70,70,60,15,15,30] | Phase 1.5 admittance |
