@@ -1,15 +1,23 @@
-# River Policy — Training Guide
+# River Policy — Run Guide
 
 ## Overview
 
-Training runs **online** against the live Gazebo simulation. Each `insert_cable`
-action call is one episode. The SAC agent explores randomly for the first 500
-steps (~2 episodes), then starts updating its networks after every step.
+**Active policy: `MyPolicy` — classical compliant-descent controller (no learning).**
 
-Weights are saved automatically to:
-```
-river-policy/river_policy/weights/sac_cable.zip
-```
+The SAC training code (`TrainingPolicy`, `env.py`) is kept in the repo as
+reference but is **not used for evaluation**. Blind RL cannot learn target
+localization without camera or TF signals, so we switched to a classical
+two-phase compliant descent that relies on the admittance controller and
+the port chamfer to guide the plug in.
+
+Algorithm (see `policy.py:MyPolicy`):
+1. **Approach** — slow descent (15 mm/s) with low Z-stiffness until wrist
+   force indicates contact with the port face.
+2. **Settle** — slower descent (8 mm/s) with even lower stiffness so the
+   chamfer can funnel the plug into the hole.
+3. **Verify** — if we descended > 15 mm past the contact point, it's seated.
+
+No vision, no learning, no ground-truth TF needed.
 
 ---
 
@@ -23,16 +31,19 @@ river-policy/river_policy/weights/sac_cable.zip
 
 ## Step-by-Step Launch
 
-Open **three terminals**, all from `/home/rishabh/ws_aic/src/aic`.
+Open **two terminals**, both from `/home/rishabh/ws_aic/src/aic`.
+
+> `aic_engine` (launched with Gazebo) automatically sends tasks to the policy
+> node once it activates. You do **not** need to send goals manually.
 
 ---
 
 ### Terminal 1 — Gazebo + RViz2
 
 ```bash
-distrobox enter -r aic_eval -- bash -c \
-  "__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia \
-   /entrypoint.sh ground_truth:=false start_aic_engine:=true"
+distrobox enter -r aic_eval -- bash -c \ 
+    "__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia \
+     /entrypoint.sh ground_truth:=false start_aic_engine:=true" 2>&1 | tee river-policy/gazebo.log
 ```
 
 Wait until you see Gazebo and RViz2 fully loaded before continuing.
@@ -43,116 +54,51 @@ Wait until you see Gazebo and RViz2 fully loaded before continuing.
 
 ```bash
 pixi run --frozen ros2 run aic_model aic_model \
-  --ros-args -p use_sim_time:=true -p policy:=river_policy.TrainingPolicy
+    --ros-args -p use_sim_time:=true -p policy:=river_policy.MyPolicy 2>&1 | tee river-policy/run.log
 ```
 
-Expected output:
+`aic_engine` will configure and activate the node automatically. Once you see:
 ```
-[INFO] Loading policy module: river_policy.TrainingPolicy
-[INFO] Using policy: TrainingPolicy
-```
-
-Wait here — the node is loaded but not yet active.
-
----
-
-### Terminal 3 — Activate + Send Goals
-
-**Step 1: Activate the lifecycle node** (once per session)
-
-```bash
-pixi run --frozen ros2 lifecycle set /aic_model configure
-pixi run --frozen ros2 lifecycle set /aic_model activate
-```
-
-Expected output in Terminal 2:
-```
-[INFO] on_configure(...)
-[INFO] Instantiating policy...
-Using cuda device
-[INFO] TrainingPolicy ready. Weights will be saved to .../sac_cable.zip
 [INFO] on_activate()
+[INFO] Goal accepted
 ```
+each trial runs back-to-back without any manual intervention.
 
-**Step 2: Send training goals** (see scenarios below)
+> **Note:** The `[ERROR] aic_model lifecycle is not in the active state` message
+> that appears briefly during startup is a harmless race condition — the engine
+> retries and succeeds immediately after.
 
 ---
 
-## Training Scenarios
+## What to Expect
 
-Run these one at a time in Terminal 3. Each command blocks until the episode
-finishes, then you run the next one. Cycle through all three trials to cover
-both plug types and board positions.
-
-After each goal you will see in Terminal 2:
+`aic_engine` cycles through its configured trials automatically. Per trial
+you will see the policy log:
 ```
-[INFO] Episode N done. Return=XXX  success=True/False
+[INFO] MyPolicy (classical compliant descent) ready
+[INFO] Start pose: xyz=(0.xxx, 0.yyy, 1.zzz)
+[INFO] river-policy: contact at z=1.zzz (fz=X.X N)
+[INFO] river-policy: inserted N.N mm
 ```
+followed by the `aic_engine` score summary.
 
----
-
-### Smoke Test — Single Episode Per Trial
-
-Run one episode of each trial type to confirm the full pipeline works before
-starting a long training run.
-
-**Trial 1 — SFP, NIC card rail 0**
-```bash
-pixi run --frozen ros2 action send_goal /insert_cable \
-  aic_task_interfaces/action/InsertCable \
-  "{task: {id: 'trial_1', cable_type: 'sfp_sc', cable_name: 'cable_0', \
-    plug_type: 'sfp', plug_name: 'sfp_tip', port_type: 'sfp', \
-    port_name: 'sfp_port_0', target_module_name: 'nic_card_mount_0', \
-    time_limit: 180}}"
-```
-
-**Trial 2 — SFP, NIC card rail 1**
-```bash
-pixi run --frozen ros2 action send_goal /insert_cable \
-  aic_task_interfaces/action/InsertCable \
-  "{task: {id: 'trial_2', cable_type: 'sfp_sc', cable_name: 'cable_0', \
-    plug_type: 'sfp', plug_name: 'sfp_tip', port_type: 'sfp', \
-    port_name: 'sfp_port_0', target_module_name: 'nic_card_mount_1', \
-    time_limit: 180}}"
-```
-
-**Trial 3 — SC plug**
-```bash
-pixi run --frozen ros2 action send_goal /insert_cable \
-  aic_task_interfaces/action/InsertCable \
-  "{task: {id: 'trial_3', cable_type: 'sfp_sc', cable_name: 'cable_1', \
-    plug_type: 'sc', plug_name: 'sc_tip', port_type: 'sc', \
-    port_name: 'sc_port_base', target_module_name: 'sc_port_1', \
-    time_limit: 180}}"
-```
-
-**Smoke test pass criteria:**
-- Terminal 2 shows `Episode N done. Return=... success=False` (False is expected
-  during random exploration — the episode completing without a crash is the pass)
-- No Python tracebacks in Terminal 2
-- The robot arm visibly moves in Gazebo during each episode
+### Smoke test pass criteria
+- Policy logs `Start pose` within 1 s of goal acceptance
+- Policy logs `contact at z=…` during descent (arm hits port face)
+- No Python tracebacks
+- `aic_engine` reports a Tier 3 score > 0 (proximity or partial insertion)
 
 ---
 
 ## Main Training Run
 
-Once smoke tests pass, cycle through trials repeatedly. After ~500 total steps
-(end of episode 2) you will see SAC loss logs in Terminal 2:
+`aic_engine` drives all episodes automatically. Just leave both terminals
+running. After ~500 total steps (end of episode 2) SAC loss logs will appear
+in Terminal 2:
 ```
 train/actor_loss   -0.23
 train/critic_loss   0.45
 train/ent_coef      0.42
-```
-
-Recommended cycle — run each command after the previous one returns:
-
-```bash
-# Round 1
-pixi run --frozen ros2 action send_goal /insert_cable aic_task_interfaces/action/InsertCable "{task: {id: 'trial_1', cable_type: 'sfp_sc', cable_name: 'cable_0', plug_type: 'sfp', plug_name: 'sfp_tip', port_type: 'sfp', port_name: 'sfp_port_0', target_module_name: 'nic_card_mount_0', time_limit: 180}}"
-pixi run --frozen ros2 action send_goal /insert_cable aic_task_interfaces/action/InsertCable "{task: {id: 'trial_2', cable_type: 'sfp_sc', cable_name: 'cable_0', plug_type: 'sfp', plug_name: 'sfp_tip', port_type: 'sfp', port_name: 'sfp_port_0', target_module_name: 'nic_card_mount_1', time_limit: 180}}"
-pixi run --frozen ros2 action send_goal /insert_cable aic_task_interfaces/action/InsertCable "{task: {id: 'trial_3', cable_type: 'sfp_sc', cable_name: 'cable_1', plug_type: 'sc', plug_name: 'sc_tip', port_type: 'sc', port_name: 'sc_port_base', target_module_name: 'sc_port_1', time_limit: 180}}"
-
-# Repeat rounds until success rate improves
 ```
 
 **Training milestones to watch for:**
@@ -177,8 +123,8 @@ pixi run --frozen ros2 run aic_model aic_model \
   --ros-args -p use_sim_time:=true -p policy:=river_policy.MyPolicy
 ```
 
-Then activate and send goals exactly as above. The policy will run
-deterministically using the saved weights.
+Then activate the node if needed (see lifecycle check above). `aic_engine`
+will send goals automatically and the policy runs deterministically.
 
 ---
 
@@ -190,8 +136,12 @@ Use `--frozen` flag on all `pixi run` commands (lockfile is stale upstream).
 **`/aic_model` not found by lifecycle commands**
 The policy node is not running. Check Terminal 2.
 
-**`Goal rejected`**
-The node is not in the active lifecycle state. Run configure + activate again.
+**`Goal rejected` or node stuck in inactive state**
+`aic_engine` did not auto-activate the node. Run manually:
+```bash
+pixi run --frozen ros2 lifecycle set /aic_model configure
+pixi run --frozen ros2 lifecycle set /aic_model activate
+```
 
 **Episode returns -400 after many rounds (no improvement)**
 The reward shaping may need tuning for your specific board configuration.

@@ -38,14 +38,19 @@ PLUG_TYPE_MAP: dict[str, int] = {
     "sc_plug": 1,
 }
 
-MAX_DELTA_POS = 0.005   # 5 mm per 50 ms step  (~10 cm/s max)
-MAX_DELTA_ROT = 0.03    # ~1.7 deg per step
+MAX_DELTA_POS = 0.003   # 3 mm per 50 ms step  (~6 cm/s max)
+MAX_DELTA_ROT = 0.02    # ~1.1 deg per step
+
+# Absolute workspace clamp relative to the start pose of each episode.
+# Prevents random exploration from commanding the TCP outside reach.
+MAX_WORKSPACE_POS = 0.08    # ±8 cm box around episode start
+MAX_WORKSPACE_ROT = 0.35    # ±20 deg cone
 
 # Force/torque thresholds for reward shaping.
-LATERAL_FORCE_SCALE = 0.02   # penalty weight for (fx² + fy²)
+LATERAL_FORCE_SCALE = 0.002  # penalty weight for (fx² + fy²) — softened
 INSERTION_FZ_MIN = 5.0       # N downward force that signals contact/insertion
-FORCE_LIMIT = 25.0           # N  – hard excess penalty beyond this
-TORQUE_LIMIT = 2.5           # Nm
+FORCE_LIMIT = 30.0           # N  – hard excess penalty beyond this
+TORQUE_LIMIT = 3.0           # Nm
 
 MAX_STEPS = 300              # ~15 s at 20 Hz
 
@@ -96,12 +101,20 @@ class CableInsertionEnv(gym.Env):
         self._inserted = False
 
         obs_msg = self._wait_for_observation()
+        start = obs_msg.controller_state.tcp_pose.position
+        self._start_xyz = np.array([start.x, start.y, start.z], dtype=np.float32)
         return self._extract_obs(obs_msg), {}
 
     def step(self, action: np.ndarray):
         obs_msg = self._wait_for_observation()
 
         target_pose = self._apply_delta(obs_msg.controller_state.tcp_pose, action)
+        # Clamp target position to a safe box around the episode start —
+        # prevents random exploration from driving the arm into self-collision.
+        p = target_pose.position
+        p.x = float(np.clip(p.x, self._start_xyz[0] - MAX_WORKSPACE_POS, self._start_xyz[0] + MAX_WORKSPACE_POS))
+        p.y = float(np.clip(p.y, self._start_xyz[1] - MAX_WORKSPACE_POS, self._start_xyz[1] + MAX_WORKSPACE_POS))
+        p.z = float(np.clip(p.z, self._start_xyz[2] - MAX_WORKSPACE_POS, self._start_xyz[2] + MAX_WORKSPACE_POS))
         self._command_pose(target_pose)
         self._sleep(0.05)  # 20 Hz
 
@@ -208,10 +221,10 @@ class CableInsertionEnv(gym.Env):
         # Reward sustained downward contact force (insertion progress)
         r_progress = 0.05 * max(0.0, -fz)
 
-        # Hard penalty for exceeding force/torque limits
+        # Linear penalty for exceeding force/torque limits (not squared — was exploding).
         force_excess = max(0.0, np.sqrt(fx**2 + fy**2 + fz**2) - FORCE_LIMIT)
         torque_excess = max(0.0, float(np.linalg.norm(torque)) - TORQUE_LIMIT)
-        r_limit = -5.0 * (force_excess**2 + torque_excess**2)
+        r_limit = -0.5 * (force_excess + torque_excess)
 
         # Small per-step time penalty to encourage speed
         r_step = -0.05
