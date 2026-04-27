@@ -169,7 +169,8 @@ task "Task not completed" and zero out *all* Tier 2 + Tier 3 scoring.
 | V0.8 | Expanded spiral (70 mm, 6 turns); per-module XY offsets | 86.8 |
 | V1.0 | 3-camera triangulation; bad-spawn abort; raised drop threshold 3→6 mm; 2-step confirm | 115.47 |
 | V1.1 | + Phase 1.5 partial reorient at contact; vision-miss retry; MAX_APPROACH_DEPTH 0.20→0.25 m; 3-step confirm | 89.62 |
-| **V1.2** | + Phase 2 quality gates (avg lateral force + XY drift) to reject false-success descents into non-port features | **TBD** |
+| V1.2 | + Phase 2 quality gates (avg lateral force + XY drift) to reject false-success descents into non-port features | 82.96 |
+| **V1.3** | Disable Phase 1.5 (visual rotation looked wrong); ascend to start_z before return on non-insertion (engine doesn't reliably home from deep positions) | **TBD** |
 
 Per-trial breakdown at V1.0 (score 115.47):
 

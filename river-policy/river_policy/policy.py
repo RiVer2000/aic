@@ -126,7 +126,13 @@ class MyPolicy(Policy):
 
     # --- tunable parameters -------------------------------------------------
     REORIENT_TIME = 2.0           # s     SLERP duration for the plug-aligning rotation
-    REORIENT_AT_CONTACT_FRACTION = 0.6
+    # V1.3: disabled by default (=0.0). Visual observation showed gripper rotating
+    # in an unexpected direction (anticlockwise around vertical) instead of the
+    # expected backward pitch. The math computes a correct horizontal rotation
+    # axis but the combined rotation+translation (to pin plug tip) is visually
+    # interpreted as wrong. With fraction=0 we skip Phase 1.5 entirely; raise
+    # back to 0.6 to re-enable. The pin-tip + slerp helpers stay in the file.
+    REORIENT_AT_CONTACT_FRACTION = 0.0
     REORIENT_AT_CONTACT_TIME = 1.5
     REORIENT_AT_CONTACT_STIFFNESS = [70.0, 70.0, 60.0, 15.0, 15.0, 30.0]
     REORIENT_AT_CONTACT_DAMPING   = [40.0, 40.0, 40.0, 10.0, 10.0, 15.0]
@@ -582,7 +588,27 @@ class MyPolicy(Policy):
         orientation at the contact point, pinning the plug tip to avoid XY drift.
 
         Returns (new_hold_x, new_hold_y, new_hold_ori) from the actual post-reorient obs.
+
+        V1.3 — short-circuit when fraction is 0: don't waste REORIENT_AT_CONTACT_TIME
+        seconds on a no-op SLERP. Just return the current pose.
         """
+        if self.REORIENT_AT_CONTACT_FRACTION <= 0.0:
+            obs = self._wait_for_obs(get_observation)
+            cur = obs.controller_state.tcp_pose
+            self.get_logger().info(
+                "Reorient-at-contact disabled (fraction=0); skipping"
+            )
+            return (
+                cur.position.x,
+                cur.position.y,
+                Quaternion(
+                    x=cur.orientation.x,
+                    y=cur.orientation.y,
+                    z=cur.orientation.z,
+                    w=cur.orientation.w,
+                ),
+            )
+
         plug_offset = self.PLUG_OFFSET_IN_GRIPPER.get(
             plug_name, self.PLUG_OFFSET_IN_GRIPPER["sfp_tip"]
         )
@@ -1070,6 +1096,17 @@ class MyPolicy(Policy):
         # Phase 4 — Let the connector settle, then freeze the arm so it doesn't
         # keep tracking a stale low-Z command after we return.
         self.sleep_for(self.SETTLE_TIME)
+
+        # V1.3 — If insertion was unsuccessful, ascend to start_z before the final
+        # hold. Engine doesn't reliably home the arm between trials when we leave
+        # it deep in the workspace (V1.2 Trial 2 started where Trial 1 ended).
+        # Skip the ascend if the heuristic says we inserted — pulling the gripper
+        # up would extract the plug from the port.
+        if not insert_successful:
+            self._ascend_to(
+                get_observation, move_robot, start_z, hold_x, hold_y, hold_ori
+            )
+
         self._hold_current_pose(get_observation, move_robot)
 
         # Always return True so the engine measures the final plug-port distance
