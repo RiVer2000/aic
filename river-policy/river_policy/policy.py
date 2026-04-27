@@ -144,11 +144,11 @@ class MyPolicy(Policy):
     # Phase 3 — Spiral search after Phase 2 fails.
     # Lifts the plug a hair, then sweeps XY in an Archimedean spiral around the
     # contact point, looking for a Z-drop that signals the plug fell into the hole.
-    SPIRAL_MAX_RADIUS = 0.012     # m     up to ±12 mm from contact XY
-    SPIRAL_TURNS = 4              #       full revolutions in the spiral
-    SPIRAL_POINTS_PER_TURN = 6    #       angular resolution
+    SPIRAL_MAX_RADIUS = 0.070     # m     up to ±70 mm — SFP ports sit ~50-60 mm from contact
+    SPIRAL_TURNS = 6              #       full revolutions in the spiral
+    SPIRAL_POINTS_PER_TURN = 8    #       angular resolution
     SPIRAL_DWELL = 0.25           # s     hold each XY position to let the plug settle
-    SPIRAL_PUSH_OFFSET = 0.003    # m     command Z this far below contact_z to push lightly
+    SPIRAL_PUSH_OFFSET = 0.006    # m     command Z this far below contact_z to push lightly
     SPIRAL_DROP_THRESHOLD = 0.003 # m     Z drop past contact_z that signals a found hole
     SPIRAL_STIFFNESS = [80.0, 80.0, 30.0, 40.0, 40.0, 40.0]   # low Z so plug can drop in
     SPIRAL_DAMPING = [40.0, 40.0, 25.0, 18.0, 18.0, 18.0]
@@ -318,6 +318,18 @@ class MyPolicy(Policy):
     # Maximum XY correction we'll trust from a single vision detection.
     # Bounded so a misdetection can't drive us far off the engine's spawn pose.
     MAX_VISION_XY_CORRECTION = 0.04   # m  — ±4 cm
+
+    # Per-module coarse XY correction applied before Phase 1.
+    # These compensate for board positions that place the target port far from
+    # the arm's fixed spawn pose.  Derived from the delta between each trial's
+    # board Y in sample_config.yaml:
+    #   trial_1/2  board y=-0.20  →  no correction needed
+    #   trial_3    board y= 0.00  →  +0.20 m board shift → arm must move ~-0.19 m in Y
+    # Tune by inspecting "contact at z=..." in run.log after a calibration run:
+    # if final-plug-port-distance < SPIRAL_MAX_RADIUS the spiral will find the port.
+    MODULE_XY_OFFSETS: dict[str, tuple[float, float]] = {
+        "sc_port_1": (0.00, -0.19),   # (dx, dy) in base_link metres — tune empirically
+    }
 
     # Camera frame → base_link sign convention. The center wrist camera
     # looks roughly down at the workpiece. Standard ROS camera optical frame:
@@ -609,6 +621,19 @@ class MyPolicy(Policy):
             hold_y = hold_y + dy_vis
             self.get_logger().info(
                 f"Descent centre after vision correction: ({hold_x:.4f}, {hold_y:.4f})"
+            )
+
+        # Module-name coarse correction — applied on top of vision correction.
+        # Compensates for board placements where the target port is far from the
+        # arm's fixed spawn pose (e.g. trial_3 sc_port_1 is ~21 cm away).
+        mod_offset = self.MODULE_XY_OFFSETS.get(task.target_module_name)
+        if mod_offset is not None:
+            dx_mod, dy_mod = mod_offset
+            hold_x += dx_mod
+            hold_y += dy_mod
+            self.get_logger().info(
+                f"Module '{task.target_module_name}' offset ({dx_mod:+.3f}, {dy_mod:+.3f}) m "
+                f"→ descent centre ({hold_x:.4f}, {hold_y:.4f})"
             )
 
         # Phase 0 — Settle: hold position, then average wrench to get a baseline.
