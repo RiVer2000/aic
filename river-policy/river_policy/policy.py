@@ -1095,18 +1095,12 @@ class MyPolicy(Policy):
 
         # Phase 4 — Let the connector settle, then freeze the arm so it doesn't
         # keep tracking a stale low-Z command after we return.
+        # (V1.3 ascend-to-start_z reverted in V1.4: the engine measures the plug
+        # AT THE TIME insert_cable returns. Moving the plug back up to start_z
+        # after a non-insertion drove the plug above the port surface, blowing
+        # past max_distance = 0.5 * initial_plug_port_distance and zeroing
+        # both Tier 3 proximity and all of Tier 2 [score: 3/300].)
         self.sleep_for(self.SETTLE_TIME)
-
-        # V1.3 — If insertion was unsuccessful, ascend to start_z before the final
-        # hold. Engine doesn't reliably home the arm between trials when we leave
-        # it deep in the workspace (V1.2 Trial 2 started where Trial 1 ended).
-        # Skip the ascend if the heuristic says we inserted — pulling the gripper
-        # up would extract the plug from the port.
-        if not insert_successful:
-            self._ascend_to(
-                get_observation, move_robot, start_z, hold_x, hold_y, hold_ori
-            )
-
         self._hold_current_pose(get_observation, move_robot)
 
         # Always return True so the engine measures the final plug-port distance
