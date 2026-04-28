@@ -171,7 +171,8 @@ task "Task not completed" and zero out *all* Tier 2 + Tier 3 scoring.
 | V1.1 | + Phase 1.5 partial reorient at contact; vision-miss retry; MAX_APPROACH_DEPTH 0.20→0.25 m; 3-step confirm | 89.62 |
 | V1.2 | + Phase 2 quality gates (avg lateral force + XY drift) to reject false-success descents into non-port features | 82.96 |
 | V1.3 | Disable Phase 1.5 + ascend to start_z on non-insertion. Catastrophic regression — engine measures plug AT return, ascend drove it above port surface, all 3 trials ended outside max_distance, scoring zeroed everywhere. | 3.00 |
-| **V1.4** | Keep Phase 1.5 disabled. Revert the ascend (back to V1.2 end-of-trial behaviour). | **94.60** ✓ (T1: 47.19, T2: 46.41, T3: 1.00) |
+| V1.4 | Keep Phase 1.5 disabled. Revert the ascend (back to V1.2 end-of-trial behaviour). | **94.60** ✓ (T1: 47.19, T2: 46.41, T3: 1.00) |
+| **V1.5** | + One-shot ground-truth calibration mode (env var `RIVER_POLICY_CALIBRATE=1`) for capturing per-module port-vs-plug XY offsets to populate `MODULE_XY_OFFSETS`. | **TBD (after calibration data populated)** |
 
 Per-trial breakdown at V1.0 (score 115.47):
 

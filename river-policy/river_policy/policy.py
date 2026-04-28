@@ -17,7 +17,9 @@ import numpy as np
 from aic_control_interfaces.msg import MotionUpdate, TrajectoryGenerationMode
 from geometry_msgs.msg import Point, Pose, Quaternion, Vector3, Wrench
 from rclpy.duration import Duration
+from rclpy.time import Time
 from std_msgs.msg import Header
+from tf2_ros import TransformException
 from transforms3d.euler import euler2quat
 from transforms3d.quaternions import qinverse, qmult, quat2mat
 
@@ -536,6 +538,79 @@ class MyPolicy(Policy):
         )
         return dx, dy, True
 
+    def _wait_for_tf(
+        self, target_frame: str, source_frame: str, timeout_sec: float = 5.0
+    ) -> bool:
+        """Block until the named TF becomes available, or fail after timeout_sec."""
+        start = self.time_now()
+        timeout = Duration(seconds=timeout_sec)
+        attempt = 0
+        while (self.time_now() - start) < timeout:
+            try:
+                self._parent_node._tf_buffer.lookup_transform(
+                    target_frame, source_frame, Time()
+                )
+                return True
+            except TransformException:
+                if attempt % 10 == 0:
+                    self.get_logger().info(
+                        f"Calibration: waiting for TF {source_frame} -> {target_frame} "
+                        "(needs ground_truth:=true)"
+                    )
+                attempt += 1
+                self.sleep_for(0.1)
+        return False
+
+    def _calibration_step(self, task) -> None:
+        """
+        Read port and plug-tip TFs (requires ground_truth:=true), compute the
+        XY offset that would put the plug tip directly above the port, and log
+        it in a copy-pasteable form so it can be hardcoded into MODULE_XY_OFFSETS.
+
+        Does NOT command any motion; the caller (insert_cable) returns immediately
+        after this so aic_engine moves on to the next trial.
+        """
+        port_frame = f"task_board/{task.target_module_name}/{task.port_name}_link"
+        plug_frame = f"{task.cable_name}/{task.plug_name}_link"
+
+        if not self._wait_for_tf("base_link", port_frame):
+            self.get_logger().error(f"Calibration: could not get port TF for {port_frame}")
+            return
+        if not self._wait_for_tf("base_link", plug_frame):
+            self.get_logger().error(f"Calibration: could not get plug TF for {plug_frame}")
+            return
+
+        try:
+            port_tf = self._parent_node._tf_buffer.lookup_transform(
+                "base_link", port_frame, Time()
+            )
+            plug_tf = self._parent_node._tf_buffer.lookup_transform(
+                "base_link", plug_frame, Time()
+            )
+        except TransformException as exc:
+            self.get_logger().error(f"Calibration: TF lookup failed: {exc}")
+            return
+
+        port_x = port_tf.transform.translation.x
+        port_y = port_tf.transform.translation.y
+        port_z = port_tf.transform.translation.z
+        plug_x = plug_tf.transform.translation.x
+        plug_y = plug_tf.transform.translation.y
+        plug_z = plug_tf.transform.translation.z
+
+        dx_mod = port_x - plug_x
+        dy_mod = port_y - plug_y
+
+        self.get_logger().info(
+            f"CALIBRATION  module={task.target_module_name!r}  port_xy=({port_x:.4f},{port_y:.4f})  "
+            f"plug_xy=({plug_x:.4f},{plug_y:.4f})  z_drop={(port_z-plug_z)*1000:.1f}mm"
+        )
+        # Copy-paste line for hardcoding into MODULE_XY_OFFSETS:
+        self.get_logger().info(
+            f'CALIBRATION_OFFSET    "{task.target_module_name}": '
+            f"({dx_mod:+.4f}, {dy_mod:+.4f}),"
+        )
+
     def _hold_current_pose(self, get_observation, move_robot) -> None:
         """Command the arm to hold its current pose so it doesn't drift after return."""
         obs = self._wait_for_obs(get_observation)
@@ -784,6 +859,21 @@ class MyPolicy(Policy):
         move_robot: MoveRobotCallback,
         send_feedback: SendFeedbackCallback,
     ) -> bool:
+        # V1.5 — One-shot calibration mode. Set RIVER_POLICY_CALIBRATE=1 in the
+        # environment when launching aic_model AND launch the eval with
+        # ground_truth:=true. The policy will read each trial's port TF, log
+        # the XY offset that puts the plug tip above the port, and return True
+        # immediately so the engine cycles through all 3 trials quickly. Paste
+        # the logged CALIBRATION_OFFSET lines into MODULE_XY_OFFSETS, unset
+        # the env var, and rerun normally with ground_truth:=false.
+        if os.environ.get("RIVER_POLICY_CALIBRATE") == "1":
+            send_feedback(
+                f"river-policy: CALIBRATION mode for {task.plug_name} → {task.port_name}"
+            )
+            self._calibration_step(task)
+            self.sleep_for(0.5)
+            return True
+
         send_feedback(
             f"river-policy: classical insert for {task.plug_name} → {task.port_name}"
         )
